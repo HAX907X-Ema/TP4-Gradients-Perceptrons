@@ -1,0 +1,253 @@
+---
+title: "TP3 : Gradients Stochastiques et Perceptrons"
+author:
+    - Ema Cerezo
+date: today
+project:
+    type: website
+    output-dir: dist
+format: 
+    html:
+      toc: true
+      toc-title: Table des matières
+      toc-location: left
+      embed-resources: true
+      smooth-scroll: true
+theme: flatly
+---
+
+```{python libraries}
+#| echo: false
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+from matplotlib import rc
+from sklearn import linear_model
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import PolynomialFeatures
+import os
+
+from src.tp_perceptron_source import (rand_gauss, rand_bi_gauss, rand_checkers,
+                                  rand_clown, plot_2d, gradient,
+                                  plot_gradient, frontiere,
+                                  hinge_loss, gr_hinge_loss,
+                                  mse_loss, gr_mse_loss)
+
+# plt.rcParams.update({'font.size': 10})
+
+plt.close('all')
+rc('font', **{'family': 'sans-serif', 'sans-serif': ['Computer Modern Roman']})
+params = {'figure.figsize': (15, 8),
+          'text.usetex': False,
+          # 'axes.labelsize': 12,
+          # 'font.size': 16,
+          # 'legend.fontsize': 16,
+          }
+plt.rcParams.update(params)
+
+sns.set_context("poster")
+sns.set_palette("colorblind")
+sns.set_style("white")
+sns.axes_style()
+
+saving_activated = False
+
+np.random.seed(44)
+```
+
+## Les classifiers linéaires (affines)
+
+### Question 1
+
+On utilise les données suivantes :
+
+```{python donneesQ1}
+#| echo : false
+
+# Data
+n = 100
+mu = [1., 1.]
+sigmas = [1., 1.]
+rand_gauss(n, mu, sigmas)
+
+n1 = 20
+n2 = 20
+mu1 = [1., 1.]
+mu2 = [-1., -1.]
+sigmas1 = [0.9, 0.9]
+sigmas2 = [0.9, 0.9]
+X1, y1 = rand_bi_gauss(n1, n2, mu1, mu2, sigmas1, sigmas2)
+
+n1 = 50
+n2 = 50
+sigmas1 = 1.
+sigmas2 = 5.
+X2, y2 = rand_clown(n1, n2, sigmas1, sigmas2)
+
+n1 = 75
+n2 = 75
+sigma = 0.1
+X3, y3 = rand_checkers(n1, n2, sigma)
+
+# Display
+plt.figure(figsize=(15, 5))
+plt.subplot(131)
+ax = plt.gca()
+plt.title('First data set')
+plot_2d(X1, y1, ax)
+
+plt.subplot(132)
+ax = plt.gca()
+plt.title('Second data set')
+plot_2d(X2, y2, ax)
+
+plt.subplot(133)
+ax = plt.gca()
+plt.title('Third data set')
+plot_2d(X3, y3, ax)
+plt.show()
+```
+
+Il est aisé de séparer le premier jeu de données avec un séparateur 
+linéaire : Il suffit de tracer une droite dans le cône entre les données 
+bleues et les données oranges. En particulier, utiliser un SVM permettrait 
+de maximiser la marge entre le séparateur et les données. 
+
+Il n'y a pas de très bon choix pour le second jeu de données.
+
+Il est pratiquement impossible de séparer le troisième jeu de données avec 
+un séparateur linéaire.
+
+### Question 2
+
+**a)** Le vecteur de prédiction est défini comme suit :
+
+$$\hat f_w (x) := w_0 + \sum^p_{j=1} w_j x_j$$
+
+La fonction `predict` de `tp_perceptron_source` renvoie : `np.dot(x, w[1:])+ w[0]`
+
+Où, par cohérence avec la fonction `np.dot()` qui fait le produit de deux 
+vecteurs (arrays), `x` est un vecteur de $\mathbb{R}^p$, `w[1:]` est 
+un vecteur de $\mathbb{R}^p$, et `w[0]` est un réel (donc `w` est un 
+vecteur de $\mathbb{R}^{p+1}$).
+
+Mathématiquement, le produit scalaire de `x` ($x$) et `w[1:]` ($\omega = 
+(w_1, ..., w_p)$) donne :
+
+$$\langle x \; , \; \omega \rangle = \sum^p_{j=1} w_j x_j$$
+
+Ainsi, en ajoutant ($w_0$) `w[0]`, on obtient bien :
+
+$$\sum^p_{j=1} w_j x_j + w_0 = \hat f_w (x)$$
+
+**b)** Par ailleurs, la fonction `predict_class(x, w)` renvoie : 
+`np.sign(predict(x, w))`
+
+Elle applique donc la fonction `sign` de `numpy`sur le vecteur de 
+prédiction. Or, cette fonction renvoie `-1 if x < 0, 0 if x==0, 1 if x > 0`.
+
+Ainsi, la fonction `predict_class(x, w)` renvoie bien l'étiquette prédite 
+$sign(\hat f_w (x))$ dans les cas où $x \neq 0$, mais pas quand 
+$x = 0$ (elle renvoie `0` au lieu de `1`) (cas très rare).
+
+## Fonction de coût
+
+### Question 3
+
+On suppose que $x \in \mathbb{R}^p$ et $y \in \mathbb{R}$ sont fixes. On 
+s'intéresse à la nature des fonctions de perte "pourcentage d'erreur", 
+"quadratique" et "hinge" (constante, linéaire, quadratique, constante par morceaux, linéaire
+par morceaux, quadratique par morceaux...).
+
+**Pourcentage d'erreur :** 
+$\text{ZeroOneLoss}(\hat f_w(x), y) = \frac{1}{2} |y − sign(\hat f_w(x))|$
+
+Cette fonction est constante par morceaux.
+
+**Quadratique :** 
+$\text{MSELoss}(\hat f_w(x), y) = (y − \hat f_w(x))^2$
+
+Cette fonction est quadratique.
+
+**Hinge (charnière) :** 
+$\text{HingeLoss}(\hat f_w(x), y) = max(0, 1 − y \cdot \hat f_w(x))$
+
+Cette fonction est linéaire par morceaux.
+
+### Question 4
+
+gradient avec un batch = 1
+La donnée est utilisée une fois par époque
+
+On voudrait optimiser l'espérance de la perte
+mais trop couteux donc on optimise somme(l(f(x), y))
+mais trop couteux donc on optimise juste l(f(x), y)
+
+critère : les epsilon doivent être de carré sommable mais pas sommable
+(exemple 1/j)
+
+Modification de l'algorithme pour avoir une version aléatoire :
+
+Avec remise : 
+```
+while j ≤ niter do
+    k <- vecteur contenant les entiers de 1 à n répartis aléatoirement
+    for i in k do
+        w ← w − ϵ∇wℓ(ˆfw(xi), yi)
+    j ← j + 1
+```
+
+Sans remise : 
+```
+while j ≤ niter do
+    for i = 1 to n do
+        k <- nombre aléatoire entre 1 et n
+        w ← w − ϵ∇wℓ( ˆfw(xk), yk)
+    j ← j + 1
+```
+
+Correction :
+
+Avec remise :
+```
+while  j ≤ niter * n do
+    i0 <- rand([[1, n]])
+    w <- w - ϵ∇wℓ( ˆfw(xi0), yi0)
+    j ← j + 1
+```
+
+Sans remise :
+```
+while  j ≤ niter * n do
+    p <- permutation_aléatoire([[1, n]])
+    for i in p do:
+        w <- w - ϵ∇wℓ( ˆfw(xi), yi)
+    j ← j + 1
+```
+
+### Question 5
+
+
+### Question 6
+
+
+### Question 7
+
+
+### Question 8
+
+
+### Question 9
+
+
+
+## Perceptron : linéaire... seulement ?
+
+### Question 10
+
+
+### Question 11
+
+
+### Question 12
+
